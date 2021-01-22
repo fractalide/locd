@@ -1,0 +1,5 @@
+/target
+**/*.rs.bk
+packets/tests/words.txt
+copernica.log
+logs/*

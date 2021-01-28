@@ -867,6 +867,7 @@ dependencies = [
  "rand_core",
  "reed-solomon",
  "serde",
+ "sha3",
  "sled",
 ]
 

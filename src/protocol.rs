@@ -4,9 +4,9 @@ use {
     copernica_identity::{PrivateIdentity},
     crossbeam_channel::{Sender, Receiver },
     std::{thread},
-    sha3::{Digest, Sha3_512},
     sled::{Db},
     bincode,
+    crate::lut::HBFI_LUT,
     anyhow::{Result, anyhow},
     log::{debug},
     rand::{
@@ -65,10 +65,13 @@ impl<'a> Protocol<'a> for LOCD {
                                             .take(30)
                                             .map(char::from)
                                             .collect();
-                                        let mut hasher = Sha3_512::new();
-                                        hasher.input(rand_string.as_bytes());
-                                        let hash = hasher.result();
+                                        use cryptoxide::digest::Digest as _;
+                                        let mut hash = [0; 32];
+                                        let mut b = cryptoxide::blake2b::Blake2b::new(32);
+                                        b.input(&rand_string.as_bytes());
+                                        b.result(&mut hash);
                                         debug!("\t\t{:?}", hash);
+                                        debug!("HBFI_LUT {:?}", HBFI_LUT[0]);
                                         match hbfi.clone().request_pid {
                                             Some(request_pid) => {
                                                 debug!("\t\t\t|  RESPONSE PACKET FOUND ENCRYPT IT");

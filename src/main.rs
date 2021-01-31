@@ -2,6 +2,7 @@
 mod service;
 mod protocol;
 mod signals;
+mod lut;
 use {
     anyhow::{Result},
     sled,

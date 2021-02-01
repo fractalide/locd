@@ -1,5 +1,10 @@
 #[derive(Debug)]
-pub enum Signals {
-    RequestSecret,
-    ResponseSecret(Vec<u8>),
+pub enum Request {
+    Secret,
 }
+
+#[derive(Debug)]
+pub enum Response {
+    Secret(Vec<u8>),
+}
+

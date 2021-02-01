@@ -3,7 +3,7 @@ use {
     copernica_protocols::{Protocol},
     crate::{
         protocol::{LOCD},
-        signals::{Signals},
+        signals::{Request, Response},
     },
     std::{thread},
     crossbeam_channel::{Sender, Receiver, unbounded},
@@ -13,22 +13,22 @@ use {
 };
 pub struct LOCDService {
     link_id: Option<LinkId>,
-    p2c_tx: Option<Sender<(HBFI, Signals)>>,
-    c2p_rx: Option<Receiver<(HBFI, Signals)>>,
+    c2p_rx: Option<Receiver<(HBFI, Request)>>,
+    p2c_tx: Option<Sender<(HBFI, Response)>>,
     db: sled::Db,
     protocol: LOCD,
-    response_sid: PrivateIdentity,
+    sid: PrivateIdentity,
 }
 impl LOCDService {
-    pub fn new(db: sled::Db, response_sid: PrivateIdentity) -> Self {
-        let protocol: LOCD = Protocol::new(db.clone(), response_sid.clone());
+    pub fn new(db: sled::Db, sid: PrivateIdentity) -> Self {
+        let protocol: LOCD = Protocol::new(db.clone(), sid.clone());
         Self {
             link_id: None,
             p2c_tx: None,
             c2p_rx: None,
             db,
             protocol,
-            response_sid,
+            sid,
         }
     }
     pub fn peer_with_link(
@@ -39,15 +39,14 @@ impl LOCDService {
         Ok(self.protocol.peer_with_link(link_id)?)
     }
     pub fn peer_with_client(&mut self)
-    -> Result<(Sender<(HBFI, Signals)>, Receiver<(HBFI, Signals)>)> {
-        let (c2p_tx, c2p_rx) = unbounded::<(HBFI, Signals)>();
-        let (p2c_tx, p2c_rx) = unbounded::<(HBFI, Signals)>();
+    -> Result<(Sender<(HBFI, Request)>, Receiver<(HBFI, Response)>)> {
+        let (c2p_tx, c2p_rx) = unbounded::<(HBFI, Request)>();
+        let (p2c_tx, p2c_rx) = unbounded::<(HBFI, Response)>();
         self.p2c_tx = Some(p2c_tx);
         self.c2p_rx = Some(c2p_rx);
         Ok((c2p_tx, p2c_rx))
     }
     pub fn run(&mut self) -> Result<()>{
-        //use HTLC::{Variant::*, *};
         let p2c_tx = self.p2c_tx.clone();
         let c2p_rx = self.c2p_rx.clone();
         let link_id = self.link_id.clone();
@@ -58,11 +57,10 @@ impl LOCDService {
                 loop {
                     if let Ok((hbfi, command)) = c2p_rx.recv() {
                         match command {
-                            Signals::RequestSecret => {
+                            Request::Secret => {
                                 let hashed_secret = protocol.hashed_secret(hbfi.clone())?;
-                                p2c_tx.send((hbfi, Signals::ResponseSecret(hashed_secret)))?;
+                                p2c_tx.send((hbfi, Response::Secret(hashed_secret)))?;
                             },
-                            _ => {},
                         }
 
                     }

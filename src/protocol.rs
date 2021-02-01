@@ -1,13 +1,11 @@
 use {
-    copernica_common::{LinkId, NarrowWaistPacket, LinkPacket, InterLinkPacket, HBFI, serialization::*, bloom_filter_index},
+    copernica_common::{LinkId, NarrowWaistPacket, LinkPacket, InterLinkPacket, HBFI, serialization::*, bloom_filter_index as bfi},
     copernica_protocols::{Protocol},
     copernica_identity::{PrivateIdentity},
     crossbeam_channel::{Sender, Receiver },
     std::{thread},
     sled::{Db},
-    bincode,
-    crate::lut::HBFI_LUT,
-    anyhow::{Result, anyhow},
+    anyhow::{Result},
     log::{debug},
     rand::{
         distributions::Alphanumeric,
@@ -19,7 +17,7 @@ pub struct LOCD {
     rs: Db,
     l2p_rx: Option<Receiver<InterLinkPacket>>,
     p2l_tx: Option<Sender<InterLinkPacket>>,
-    response_sid: PrivateIdentity,
+    sid: PrivateIdentity,
 }
 impl<'a> LOCD {
     pub fn hashed_secret(&mut self, hbfi: HBFI) -> Result<Vec<u8>> {
@@ -29,9 +27,9 @@ impl<'a> LOCD {
     }
 }
 impl<'a> Protocol<'a> for LOCD {
-    fn new(rs: Db, response_sid: PrivateIdentity) -> LOCD {
+    fn new(rs: Db, sid: PrivateIdentity) -> LOCD {
         LOCD {
-            response_sid,
+            sid,
             link_id: None,
             l2p_rx: None,
             p2l_tx: None,
@@ -43,23 +41,24 @@ impl<'a> Protocol<'a> for LOCD {
         let l2p_rx = self.get_l2p_rx();
         let p2l_tx = self.get_p2l_tx();
         let link_id = self.get_link_id();
-        let response_sid = self.get_response_sid();
+        let sid = self.get_sid();
         thread::spawn(move || {
             if let (Some(l2p_rx), Some(p2l_tx), Some(link_id)) = (l2p_rx, p2l_tx, link_id) {
-                let res_pk = response_sid.public_id();
-                let res = bloom_filter_index(&format!("{}", response_sid.public_id()));
-                let app = bloom_filter_index("locd");
-                let m0d = bloom_filter_index("htlc");
-                let fun = bloom_filter_index("generate_secret");
-                let arg = bloom_filter_index("shh");
+                let res_me = bfi(&format!("{}", sid.public_id()))?;
+                let app_me = bfi("locd")?;
                 loop {
                     if let Ok(ilp) = l2p_rx.recv() {
                         debug!("\t\t\t|  link-to-protocol");
                         let nw: NarrowWaistPacket = ilp.narrow_waist();
                         match nw.clone() {
                             NarrowWaistPacket::Request { hbfi, .. } => {
-                                match hbfi.to_tup() {
-                                    (res, _, app, m0d, fun, arg) => {
+                                match hbfi {
+                                    HBFI { res, app, m0d, fun, arg, .. } if
+                                    (res == res_me) &&
+                                    (app == app_me) &&
+                                    (m0d == bfi("htlc")?) &&
+                                    (fun == bfi("generate_secret")?) &&
+                                    (arg == bfi("shh")?) => {
                                         let rand_string: String = thread_rng()
                                             .sample_iter(&Alphanumeric)
                                             .take(30)
@@ -71,29 +70,14 @@ impl<'a> Protocol<'a> for LOCD {
                                         b.input(&rand_string.as_bytes());
                                         b.result(&mut hash);
                                         debug!("\t\t{:?}", hash);
-                                        debug!("HBFI_LUT {:?}", HBFI_LUT[0]);
-                                        match hbfi.clone().request_pid {
-                                            Some(request_pid) => {
-                                                debug!("\t\t\t|  RESPONSE PACKET FOUND ENCRYPT IT");
-                                                let nw = NarrowWaistPacket::response(response_sid.clone(), hbfi, hash.to_vec(), 0, 0)?;
-                                                let lp = LinkPacket::new(link_id.reply_to()?, nw);
-                                                let ilp = InterLinkPacket::new(link_id.clone(), lp);
-                                                debug!("\t\t\t|  protocol-to-link");
-                                                p2l_tx.send(ilp.clone())?;
-                                            },
-                                            None => {
-                                                debug!("\t\t\t|  RESPONSE PACKET FOUND CLEARTEXT IT");
-                                                let nw = NarrowWaistPacket::response(response_sid.clone(), hbfi, hash.to_vec(), 0, 0)?;
-                                                let lp = LinkPacket::new(link_id.reply_to()?, nw);
-                                                let ilp = InterLinkPacket::new(link_id.clone(), lp);
-                                                debug!("\t\t\t|  protocol-to-link");
-                                                p2l_tx.send(ilp)?;
-                                            },
-                                        }
+                                        debug!("\t\t\t|  RESPONSE PACKET FOUND ENCRYPT IT");
+                                        let nw = NarrowWaistPacket::response(sid.clone(), hbfi.clone(), hash.to_vec(), 0, 0)?;
+                                        let lp = LinkPacket::new(link_id.reply_to()?, nw);
+                                        let ilp = InterLinkPacket::new(link_id.clone(), lp);
+                                        debug!("\t\t\t|  protocol-to-link");
+                                        p2l_tx.send(ilp.clone())?;
                                     },
-                                    _ => {
-                                        debug!("Nothing");
-                                    }
+                                    _ => {}
                                 }
                             },
                             NarrowWaistPacket::Response { hbfi, .. } => {
@@ -131,8 +115,8 @@ impl<'a> Protocol<'a> for LOCD {
     fn get_link_id(&mut self) -> Option<LinkId> {
         self.link_id.clone()
     }
-    fn get_response_sid(&mut self) -> PrivateIdentity {
-        self.response_sid.clone()
+    fn get_sid(&mut self) -> PrivateIdentity {
+        self.sid.clone()
     }
 }
 

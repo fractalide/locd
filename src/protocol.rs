@@ -75,7 +75,7 @@ impl<'a> Protocol<'a> for LOCD {
                                         match hbfi.clone().request_pid {
                                             Some(request_pid) => {
                                                 debug!("\t\t\t|  RESPONSE PACKET FOUND ENCRYPT IT");
-                                                let nw = NarrowWaistPacket::response(response_sid.clone(), hbfi, hash.to_vec(), 0, 0).unwrap();
+                                                let nw = NarrowWaistPacket::response(response_sid.clone(), hbfi, hash.to_vec(), 0, 0)?;
                                                 let lp = LinkPacket::new(link_id.reply_to()?, nw);
                                                 let ilp = InterLinkPacket::new(link_id.clone(), lp);
                                                 debug!("\t\t\t|  protocol-to-link");

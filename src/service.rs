@@ -36,7 +36,7 @@ impl LOCDService {
         link_id: LinkId,
     ) -> Result<(Sender<InterLinkPacket>, Receiver<InterLinkPacket>)> {
         self.link_id = Some(link_id.clone());
-        Ok(self.protocol.peer(link_id)?)
+        Ok(self.protocol.peer_with_link(link_id)?)
     }
     pub fn peer_with_client(&mut self)
     -> Result<(Sender<(HBFI, Signals)>, Receiver<(HBFI, Signals)>)> {

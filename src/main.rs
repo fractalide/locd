@@ -24,76 +24,65 @@ use {
 
 pub fn main() -> Result<()> {
     copernica_common::setup_logging(3, None).unwrap();
-
     let mut rng = rand::thread_rng();
-    let request_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let response_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-
-    let rs0 = sled::open(generate_random_dir_name())?;
-    let rs1 = sled::open(generate_random_dir_name())?;
-    let brs = sled::open(generate_random_dir_name())?;
-
-    let mut b = Broker::new(brs);
-    let mut locd0 = LOCDService::new(rs0, response_sid.clone());
-    let mut locd1 = LOCDService::new(rs1, request_sid.clone());
-
-    let lnk_sid0 = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let lnk_sid1 = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let lnk_sid2 = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let lnk_sid3 = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-
-    let mpscv_b_id = LinkId::listen(lnk_sid0.clone(), Some(lnk_sid1.public_id()), ReplyTo::Mpsc);
-    let mpsc_vb_id = LinkId::listen(lnk_sid1.clone(), Some(lnk_sid0.public_id()), ReplyTo::Mpsc);
-    //let mpscv_b_id = LinkId::listen(lnk_sid0.clone(), None, ReplyTo::Mpsc);
-    //let mpsc_vb_id = LinkId::listen(lnk_sid1.clone(), None, ReplyTo::Mpsc);
-    let mut mpscv_b_link: MpscChannel = Link::new("lv_b".into(), mpscv_b_id.clone(), locd0.peer_with_link(mpscv_b_id)?)?;
-    let mut mpsc_vb_link: MpscChannel = Link::new("l_vb".into(), mpsc_vb_id.clone(), b.peer(mpsc_vb_id)?)?;
-    mpscv_b_link.female(mpsc_vb_link.male());
-    mpsc_vb_link.female(mpscv_b_link.male());
-
-    let locd_vb_address = ReplyTo::UdpIp("127.0.0.1:50002".parse()?);
-    let locdv_b_address = ReplyTo::UdpIp("127.0.0.1:50003".parse()?);
-    let locd_vb_id = LinkId::listen(lnk_sid2.clone(), Some(lnk_sid3.public_id()), locd_vb_address.clone());
-    let locdv_b_id = LinkId::listen(lnk_sid3.clone(), Some(lnk_sid2.public_id()), locdv_b_address.clone());
-    //let locd_vb_id = LinkId::listen(lnk_sid2.clone(), None, locd_vb_address.clone());
-    //let locdv_b_id = LinkId::listen(lnk_sid3.clone(), None, locdv_b_address.clone());
-    let locd_vb_link: UdpIp = Link::new("l_vb".into(), locd_vb_id.clone(), b.peer(locd_vb_id.remote(locdv_b_address)?)?)?;
-    let locdv_b_link: UdpIp = Link::new("lv_b".into(), locdv_b_id.clone(), locd1.peer_with_link(locdv_b_id.remote(locd_vb_address)?)?)?;
-
+    let A_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let B_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let C_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let brkstr = sled::open(generate_random_dir_name())?;
+    let storeA = sled::open(generate_random_dir_name())?;
+    let storeB = sled::open(generate_random_dir_name())?;
+    let storeC = sled::open(generate_random_dir_name())?;
+    let mut broker = Broker::new(brkstr);
+    let mut locdsA = LOCDService::new(storeA, A_sid.clone());
+    let mut locdsB = LOCDService::new(storeB, B_sid.clone());
+    let mut locdsC = LOCDService::new(storeC, C_sid.clone());
+    let av_br_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let a_vbr_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let bv_br_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let b_vbr_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let cv_br_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let c_vbr_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
+    let av_br_link_id = LinkId::listen(av_br_link_sid.clone(), Some(a_vbr_link_sid.public_id()), ReplyTo::Mpsc);
+    let a_vbr_link_id = LinkId::listen(a_vbr_link_sid.clone(), Some(av_br_link_sid.public_id()), ReplyTo::Mpsc);
+    let mut av_br_link: MpscChannel = Link::new("lv_b".into(), av_br_link_id.clone(), locdsA.peer_with_link(av_br_link_id)?)?;
+    let mut a_vbr_link: MpscChannel = Link::new("l_vb".into(), a_vbr_link_id.clone(), broker.peer_with_link(a_vbr_link_id)?)?;
+    av_br_link.female(a_vbr_link.male());
+    a_vbr_link.female(av_br_link.male());
+    let bv_br_link_id = LinkId::listen(bv_br_link_sid.clone(), Some(b_vbr_link_sid.public_id()), ReplyTo::Mpsc);
+    let b_vbr_link_id = LinkId::listen(b_vbr_link_sid.clone(), Some(bv_br_link_sid.public_id()), ReplyTo::Mpsc);
+    let mut bv_br_link: MpscChannel = Link::new("lv_b".into(), bv_br_link_id.clone(), locdsB.peer_with_link(bv_br_link_id)?)?;
+    let mut b_vbr_link: MpscChannel = Link::new("l_vb".into(), b_vbr_link_id.clone(), broker.peer_with_link(b_vbr_link_id)?)?;
+    bv_br_link.female(b_vbr_link.male());
+    b_vbr_link.female(bv_br_link.male());
+    let cv_br_link_id = LinkId::listen(cv_br_link_sid.clone(), Some(c_vbr_link_sid.public_id()), ReplyTo::Mpsc);
+    let c_vbr_link_id = LinkId::listen(c_vbr_link_sid.clone(), Some(cv_br_link_sid.public_id()), ReplyTo::Mpsc);
+    let mut cv_br_link: MpscChannel = Link::new("lv_b".into(), cv_br_link_id.clone(), locdsC.peer_with_link(cv_br_link_id)?)?;
+    let mut c_vbr_link: MpscChannel = Link::new("l_vb".into(), c_vbr_link_id.clone(), broker.peer_with_link(c_vbr_link_id)?)?;
+    cv_br_link.female(c_vbr_link.male());
+    c_vbr_link.female(cv_br_link.male());
     let links: Vec<Box<dyn Link>> = vec![
-        Box::new(mpsc_vb_link),
-        Box::new(mpscv_b_link),
-        Box::new(locd_vb_link),
-        Box::new(locdv_b_link)
+        Box::new(av_br_link),
+        Box::new(a_vbr_link),
+        Box::new(bv_br_link),
+        Box::new(b_vbr_link),
+        Box::new(cv_br_link),
+        Box::new(c_vbr_link),
     ];
     for link in links {
         link.run()?;
     }
-    let (locd1_c2p_tx, locd1_p2c_rx) = locd1.peer_with_client()?;
-    b.run()?;
-    locd0.run()?;
-    locd1.run()?;
-
-
-    let hbfi0: HBFI = HBFI::new(Some(request_sid.public_id()), response_sid.public_id(), "locd", "htlc", "generate_secret", "shh")?;
+    let (locdsA_c2p_tx, locdsA_p2c_rx) = locdsA.peer_with_client()?;
+    broker.run()?;
+    locdsA.run()?;
+    locdsB.run()?;
+    locdsC.run()?;
+    let hbfi0: HBFI = HBFI::new(Some(A_sid.public_id()), C_sid.public_id(), "locd", "htlc", "generate_secret", "shh")?;
     //let hbfi0: HBFI = HBFI::new(None, response_sid.public_id(), "app", "m0d", "fun", &name)?;
-
     debug!("\t\t\t\t\tclient-to-protocol");
-    locd1_c2p_tx.send((hbfi0.clone(), Signals::RequestSecret))?;
-    let (hbfi, secret_hash) = locd1_p2c_rx.recv()?;
+    locdsA_c2p_tx.send((hbfi0.clone(), Signals::RequestSecret))?;
+    let (hbfi, secret_hash) = locdsA_p2c_rx.recv()?;
     debug!("\t\t\t\t\tprotocol-to-client");
     debug!("\t\t\t\t{:?}", secret_hash);
+    let (hbfi, secret_hash) = locdsA_p2c_rx.recv()?;
     Ok(())
-}
-#[cfg(test)]
-mod copernicafs {
-    use super::*;
-    use async_std::{ task, };
-
-    #[test]
-    fn test_value_transfer_two_hops() {
-        task::block_on(async {
-            let _r = value_transfer_two_hops();
-        })
-    }
 }

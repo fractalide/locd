@@ -10,12 +10,11 @@ use {
         service::{LOCDService},
     },
     copernica_broker::{Broker},
-    copernica_common::{HBFI, LinkId, ReplyTo},
+    copernica_common::{LinkId, ReplyTo},
     copernica_links::{Link, MpscChannel},
     copernica_identity::{PrivateIdentity, Seed},
     copernica_tests::{generate_random_dir_name},
     log::{debug},
-    signals::{Request},
 };
 
 pub fn main() -> Result<()> {
@@ -67,18 +66,15 @@ pub fn main() -> Result<()> {
     for link in links {
         link.run()?;
     }
-    let (locds_a_c2p_tx, locds_a_p2c_rx) = locds_a.peer_with_client()?;
     broker.run()?;
     locds_a.run()?;
     locds_b.run()?;
     locds_c.run()?;
-    let hbfi0: HBFI = HBFI::new(Some(a_sid.public_id()), c_sid.public_id(), "locd", "htlc", "generate_secret", "shh")?;
-    //let hbfi0: HBFI = HBFI::new(None, response_sid.public_id(), "app", "m0d", "fun", &name)?;
     debug!("\t\t\t\t\tclient-to-protocol");
-    locds_a_c2p_tx.send((hbfi0.clone(), Request::Secret))?;
-    let (_, secret_hash) = locds_a_p2c_rx.recv()?;
+    let i_dont_know  = locds_a.peer_with_node(b_sid.public_id(), 1000, 800);
+    //let i_dont_know2 = locds_b.peer_with_node(c_sid.public_id(), 1000, 800);
     debug!("\t\t\t\t\tprotocol-to-client");
-    debug!("\t\t\t\t{:?}", secret_hash);
-    //let (hbfi, secret_hash) = locds_a_p2c_rx.recv()?;
+    //debug!("\t\t\t\tamount {:?}, secret {:?}", amount, secret_hash);
+    //debug!("\t\t\t\t{:?}", i_dont_know);
     Ok(())
 }

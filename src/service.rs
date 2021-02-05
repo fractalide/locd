@@ -2,30 +2,26 @@ use {
     copernica_common::{LinkId, InterLinkPacket, HBFI},
     copernica_protocols::{Protocol},
     crate::{
-        protocol::{LOCD},
+        protocol::{LOCD, ContractDetails},
         signals::{Request, Response},
     },
     std::{thread},
     crossbeam_channel::{Sender, Receiver, unbounded},
-    copernica_identity::{PrivateIdentity},
-    anyhow::{Result},
-    //log::{debug},
+    copernica_identity::{PrivateIdentity, PublicIdentity},
+    anyhow::{Result, anyhow},
+    log::{debug, error},
 };
 pub struct LOCDService {
     link_id: Option<LinkId>,
-    c2p_rx: Option<Receiver<(HBFI, Request)>>,
-    p2c_tx: Option<Sender<(HBFI, Response)>>,
     db: sled::Db,
     protocol: LOCD,
     sid: PrivateIdentity,
 }
 impl LOCDService {
     pub fn new(db: sled::Db, sid: PrivateIdentity) -> Self {
-        let protocol: LOCD = Protocol::new(db.clone(), sid.clone());
+        let mut protocol: LOCD = Protocol::new();
         Self {
             link_id: None,
-            p2c_tx: None,
-            c2p_rx: None,
             db,
             protocol,
             sid,
@@ -36,38 +32,23 @@ impl LOCDService {
         link_id: LinkId,
     ) -> Result<(Sender<InterLinkPacket>, Receiver<InterLinkPacket>)> {
         self.link_id = Some(link_id.clone());
-        Ok(self.protocol.peer_with_link(link_id)?)
+        Ok(self.protocol.peer_with_link(self.db.clone(), link_id, self.sid.clone())?)
     }
-    pub fn peer_with_client(&mut self)
-    -> Result<(Sender<(HBFI, Request)>, Receiver<(HBFI, Response)>)> {
-        let (c2p_tx, c2p_rx) = unbounded::<(HBFI, Request)>();
-        let (p2c_tx, p2c_rx) = unbounded::<(HBFI, Response)>();
-        self.p2c_tx = Some(p2c_tx);
-        self.c2p_rx = Some(c2p_rx);
-        Ok((c2p_tx, p2c_rx))
+    pub fn peer_with_node(&mut self, with_identity: PublicIdentity, amount_to_insert_into_multisig: u64, my_limit: u64) -> Result<()> {
+        //let contract_details: ContractDetails = self.protocol.contract_details(with_identity.clone())?;
+        /*if contract_details.donation_request() > my_limit {
+            let msg = "Requested amount is too expensive for what I'm willing to pay";
+            error!("{}", msg);
+            return Err(anyhow!(msg))
+        }*/
+        //let their_address = self.protocol.address(with_identity)?;
+        //println!("my_limit {}, their_limit {}, their_address {}", my_limit, contract_details.donation_request(), contract_details.address());
+        let response = self.protocol.contract_counter_offer(with_identity.clone())?;
+        println!("final {:?}", response);
+        Ok(())
     }
-    pub fn run(&mut self) -> Result<()>{
-        let p2c_tx = self.p2c_tx.clone();
-        let c2p_rx = self.c2p_rx.clone();
-        let link_id = self.link_id.clone();
-        let mut protocol = self.protocol.clone();
-        protocol.run()?;
-        thread::spawn(move || {
-            if let (Some(c2p_rx), Some(p2c_tx), Some(_link_id)) = (c2p_rx, p2c_tx, link_id) {
-                loop {
-                    if let Ok((hbfi, command)) = c2p_rx.recv() {
-                        match command {
-                            Request::Secret => {
-                                let hashed_secret = protocol.hashed_secret(hbfi.clone())?;
-                                p2c_tx.send((hbfi, Response::Secret(hashed_secret)))?;
-                            },
-                        }
-
-                    }
-                }
-            }
-            Ok::<(), anyhow::Error>(())
-        });
+    pub fn run(&mut self) -> Result<()> {
+        self.protocol.run()?;
         Ok(())
     }
 }

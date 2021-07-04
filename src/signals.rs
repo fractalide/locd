@@ -1,5 +1,5 @@
 use {
-    copernica_identity::{PublicIdentity},
+    copernica_common::{PublicIdentity},
 };
 #[derive(Debug)]
 pub enum Request {

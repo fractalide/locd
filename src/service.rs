@@ -1,28 +1,23 @@
 use {
-    copernica_common::{LinkId, InterLinkPacket, HBFI},
+    copernica_common::{LinkId, InterLinkPacket, PrivateIdentityInterface, PublicIdentity, Operations},
     copernica_protocols::{Protocol},
     crate::{
-        protocol::{LOCD, ContractDetails},
-        signals::{Request, Response},
+        protocol::{LOCD},
     },
-    std::{thread},
-    crossbeam_channel::{Sender, Receiver, unbounded},
-    copernica_identity::{PrivateIdentity, PublicIdentity},
-    anyhow::{Result, anyhow},
-    log::{debug, error},
+    std::sync::mpsc::{Receiver, SyncSender as Sender},
+    anyhow::{Result},
+    //log::{debug, error},
 };
 pub struct LOCDService {
     link_id: Option<LinkId>,
-    db: sled::Db,
     protocol: LOCD,
-    sid: PrivateIdentity,
+    sid: PrivateIdentityInterface,
 }
 impl LOCDService {
-    pub fn new(db: sled::Db, sid: PrivateIdentity) -> Self {
-        let mut protocol: LOCD = Protocol::new();
+    pub fn new(sid: PrivateIdentityInterface, ops: (String, Operations)) -> Self {
+        let protocol: LOCD = Protocol::new(sid.clone(), ops);
         Self {
             link_id: None,
-            db,
             protocol,
             sid,
         }
@@ -32,20 +27,10 @@ impl LOCDService {
         link_id: LinkId,
     ) -> Result<(Sender<InterLinkPacket>, Receiver<InterLinkPacket>)> {
         self.link_id = Some(link_id.clone());
-        Ok(self.protocol.peer_with_link(self.db.clone(), link_id, self.sid.clone())?)
+        Ok(self.protocol.peer_with_link(link_id)?)
     }
-    pub fn peer_with_node(&mut self, with_identity: PublicIdentity, amount_to_insert_into_multisig: u64, my_limit: u64) -> Result<()> {
-        //let contract_details: ContractDetails = self.protocol.contract_details(with_identity.clone())?;
-        /*if contract_details.donation_request() > my_limit {
-            let msg = "Requested amount is too expensive for what I'm willing to pay";
-            error!("{}", msg);
-            return Err(anyhow!(msg))
-        }*/
-        //let their_address = self.protocol.address(with_identity)?;
-        //println!("my_limit {}, their_limit {}, their_address {}", my_limit, contract_details.donation_request(), contract_details.address());
-        let response = self.protocol.contract_counter_offer(with_identity.clone())?;
-        println!("final {:?}", response);
-        Ok(())
+    pub fn ping(&mut self, identity: PublicIdentity) -> Result<String> {
+        self.protocol.cyphertext_ping(identity)
     }
     pub fn run(&mut self) -> Result<()> {
         self.protocol.run()?;

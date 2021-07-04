@@ -2,200 +2,117 @@ use {
     anyhow::{Result, anyhow},
     bincode,
     copernica_common::{
-        bloom_filter_index as bfi, serialization::*, InterLinkPacket, LinkId, LinkPacket,
-        NarrowWaistPacket, HBFI,
+        bloom_filter_index as bfi,
+        NarrowWaistPacket, HBFI, PrivateIdentityInterface, PublicIdentity,
+        Operations, RequestPublicIdentity
     },
-    copernica_identity::{PrivateIdentity, PublicIdentity, Signature},
     copernica_protocols::{Protocol, TxRx},
-    crossbeam_channel::{Receiver, Sender},
     log::debug,
     rand::{distributions::Alphanumeric, thread_rng, Rng},
-    sled::Db,
-    sm::sm,
-    std::collections::HashMap,
-    std::thread,
-    serde::{Deserialize, Serialize},
 };
-sm! {
-    LocdStateMachine {
-        InitialStates { AZero, BZero}
-        SendSecret {
-            AZero => AOne
-        }
-        SendAmount {
-            BZero => BOne
-        }
-    }
-}
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ContractDetails {
-    address: u64,
-    funding_amount: u64,
-    donation_request: u64,
-    signature: Signature,
-    initiator_address: Option<u64>,
-    initiator_funding_amount: Option<u64>,
-    initiator_donation_amount: Option<u64>,
-    initiator_signature: Option<Signature>,
-}
-impl ContractDetails {
-    pub fn new(address: u64, funding_amount: u64, donation_request: u64, sid: PrivateIdentity) -> Self {
-        let manifest = [u64_to_u8(address).to_vec(), u64_to_u8(funding_amount).to_vec(), u64_to_u8(donation_request).to_vec()].concat();
-        let signing_key = sid.signing_key();
-        let signature = signing_key.sign(manifest);
-        ContractDetails {
-            address,
-            funding_amount,
-            donation_request,
-            signature,
-            initiator_address: None,
-            initiator_funding_amount: None,
-            initiator_donation_amount: None, initiator_signature: None,
-        }
-    }
-    pub fn donation_request(&self) -> u64 {
-        self.donation_request
-    }
-    pub fn address(&self) -> u64 {
-        self.address
-    }
-}
+static APP_NAME: &str = "locd";
+static MOD_HTLC: &str = "htlc";
+static FUN_PEER: &str = "peer";
+static FUN_PING: &str = "ping";
+static ARG_PING: &str = "ping";
 #[derive(Clone)]
 pub struct LOCD {
-    txrx: Option<TxRx>,
+    protocol_sid: PrivateIdentityInterface,
+    txrx: TxRx,
+    ops: Operations,
 }
 impl<'a> LOCD {
-    pub fn contract_details(&mut self, response_pid: PublicIdentity) -> Result<ContractDetails> {
-        if let Some(txrx) = self.txrx.clone() {
-            let hbfi = HBFI::new(Some(txrx.sid.public_id()), response_pid, "locd", "htlc", "peer", "request_contract_details")?;
-            let details = txrx.request(hbfi.clone(), 0, 0)?;
-            let details: ContractDetails = bincode::deserialize(&details)?;
-            Ok(details)
-        } else {
-            Err(anyhow!("You must peer with a link first"))
+    pub fn cyphertext_ping(&mut self, response_pid: PublicIdentity) -> Result<String> {
+        let hbfi = HBFI::new(RequestPublicIdentity::new(Some(self.txrx.protocol_public_id()?)), response_pid, APP_NAME, MOD_HTLC, FUN_PING, ARG_PING)?;
+        let echo: Vec<Vec<u8>> = self.txrx.unreliable_unordered_request(hbfi.clone(), 0, 0)?;
+        let mut result: String = "".into();
+        for s in &echo {
+            let data: &str = bincode::deserialize(&s)?;
+            result.push_str(data);
         }
-    }
-    pub fn hashed_secret(&mut self, response_pid: PublicIdentity) -> Result<Vec<u8>> {
-        if let Some(txrx) = self.txrx.clone() {
-            let hbfi = HBFI::new(Some(txrx.sid.public_id()), response_pid, "locd", "htlc", "secret", "generate")?;
-            let secret = txrx.request(hbfi.clone(), 0, 0)?;
-            Ok(secret)
-        } else {
-            Err(anyhow!("You must peer with a link first"))
-        }
-    }
-    pub fn contract_counter_offer(&mut self, response_pid: PublicIdentity) -> Result<String> {
-        if let Some(txrx) = self.txrx.clone() {
-            let hbfi = HBFI::new(Some(txrx.sid.public_id()), response_pid, "locd", "htlc", "peer", "contract_counter_offer")?;
-            let address = txrx.request(hbfi.clone(), 0, 0)?;
-            let address: String = bincode::deserialize(&address)?;
-            Ok(address)
-        } else {
-            Err(anyhow!("You must peer with a link first"))
-        }
+        Ok(result)
     }
 }
 impl<'a> Protocol<'a> for LOCD {
-    fn new() -> LOCD {
-        LOCD {
-            txrx: None,
+    fn new(protocol_sid: PrivateIdentityInterface, (label, ops): (String, Operations)) -> Self {
+        ops.register_protocol(protocol_sid.public_id(), label);
+        Self {
+            protocol_sid,
+            txrx: TxRx::Inert,
+            ops,
         }
     }
-    fn run(&mut self) -> Result<()> {
-        let txrx = self.get_txrx();
-        thread::spawn(move || {
-            if let Some(txrx) = txrx {
-                use LocdStateMachine::*;
-                let mut sms = HashMap::new();
-                let res_check = bfi(&format!("{}", txrx.sid.clone().public_id()))?;
-                let app_check = bfi("locd")?;
-                let m0d_check = bfi("htlc")?;
-                loop {
-                    if let Ok(ilp) = txrx.l2p_rx.recv() {
-                        debug!("\t\t\t|  link-to-protocol");
-                        let nw: NarrowWaistPacket = ilp.narrow_waist();
-                        match nw.clone() {
-                            NarrowWaistPacket::Request { hbfi, .. } => match hbfi {
-                                HBFI { res, app, m0d, .. }
-                                    if (res == res_check)
-                                        && (app == app_check)
-                                        && (m0d == m0d_check) =>
-                                {
-                                    if let Some(request_pid) = hbfi.request_pid.clone() {
-                                        match hbfi {
-                                            HBFI { fun, arg, .. }
-                                                if (fun == bfi("peer")?)
-                                                    && (arg == bfi("request_contract_details")?) =>
-                                            {
-                                                let mut rng = rand::thread_rng();
-                                                let address: u64 = rng.gen::<u64>();
-                                                let funding_amount: u64 = rng.gen_range(10_000, 1_000_000);
-                                                let donation_request: u64 = rng.gen_range(0, 1000);
-                                                let details = ContractDetails::new(address, funding_amount, donation_request, txrx.sid.clone());
-                                                let details: Vec<u8> = bincode::serialize(&details)?;
-                                                txrx.respond(hbfi.clone(), details)?;
+    #[allow(unreachable_code)]
+    fn run(&self) -> Result<()> {
+        let txrx = self.txrx.clone();
+        std::thread::spawn(move || {
+            match txrx {
+                TxRx::Initialized {
+                    ref unreliable_unordered_response_tx, .. } => {
+                    let res_check = bfi(&format!("{}", txrx.protocol_public_id()?))?;
+                    let app_check = bfi(APP_NAME)?;
+                    let m0d_check = bfi(MOD_HTLC)?;
+                    loop {
+                        match txrx.clone().next() {
+                            Ok(ilp) => {
+                                debug!("\t\t\t|  link-to-protocol");
+                                let nw: NarrowWaistPacket = ilp.narrow_waist();
+                                match nw.clone() {
+                                    NarrowWaistPacket::Request { hbfi, .. } => match hbfi {
+                                        HBFI { res, app, m0d, .. }
+                                            if (res == res_check)
+                                                && (app == app_check)
+                                                && (m0d == m0d_check) =>
+                                        {
+                                            match hbfi {
+                                                HBFI { fun, arg, .. }
+                                                    if (fun == bfi(FUN_PING)?)
+                                                        && (arg == bfi(ARG_PING)?) =>
+                                                {
+                                                    let  echo: Vec<u8> = bincode::serialize(&"ping")?;
+                                                    txrx.clone().respond(hbfi.clone(), echo)?;
+                                                }
+                                                _ => {}
                                             }
-                                            HBFI { fun, arg, .. }
-                                                if (fun == bfi("address")?)
-                                                    && (arg == bfi("get")?) =>
-                                            {
-                                                let sm = LocdStateMachine::Machine::new(BZero);
-                                                sms.insert(request_pid.clone(), sm.as_enum());
-                                                let state = sms.get(&request_pid);
-                                                let mut rng = rand::thread_rng();
-                                                let number: u64 = rng.gen::<u64>();
-                                                let number: Vec<u8> = bincode::serialize(&number)?;
-                                                txrx.respond(hbfi.clone(), number)?;
-                                            }
-                                            HBFI { fun, arg, .. }
-                                                if (fun == bfi("peer")?)
-                                                    && (arg == bfi("contract_counter_offer")?) =>
-                                            {
-                                                let ack = String::from("ack");
-                                                txrx.respond(hbfi.clone(), bincode::serialize(&ack)?)?;
-                                                let hbfi1 = HBFI::new(Some(txrx.sid.public_id()), request_pid, "locd", "htlc", "peer", "request_for_request")?;
-                                                let response = txrx.request(hbfi1, 0, 0)?;
-                                                println!("Hello 1 {:?}", response);
-                                                let baby: String = bincode::deserialize(&response)?;
-                                                println!("Hello {:?}", baby);
-                                            }
-                                            HBFI { fun, arg, .. }
-                                                if (fun == bfi("peer")?)
-                                                    && (arg == bfi("request_for_request")?) =>
-                                            {
-                                                println!("I'm here");
-                                                let baby = String::from("baby");
-                                                println!("I'm here");
-                                                let baby: Vec<u8> = bincode::serialize(&baby)?;
-                                                println!("I'm here {:?}", baby);
-                                                txrx.respond(hbfi, baby)?;
-                                                println!("I'm here");
-                                            }
-                                            _ => {}
                                         }
+                                        _ => {}
+                                    },
+                                    NarrowWaistPacket::Response { hbfi, .. } => match hbfi {
+                                        HBFI { app, m0d, fun, arg, .. }
+                                            if (app == app_check)
+                                                && (m0d == m0d_check)
+                                                && (fun == bfi(FUN_PING)?)
+                                            => {
+                                                match arg {
+                                                    arg if arg == bfi(ARG_PING)? => {
+                                                        debug!("\t\t\t|  RESPONSE PACKET ARRIVED");
+                                                        unreliable_unordered_response_tx.send(ilp)?;
+                                                    },
+                                                    _ => {}
+                                                }
+                                            }
+                                        _ => {}
                                     }
                                 }
-                                _ => {}
                             },
-                            NarrowWaistPacket::Response { hbfi, .. } => {
-                                debug!("\t\t\t|  RESPONSE PACKET ARRIVED");
-                                let (_, hbfi_s) = serialize_hbfi(&hbfi)?;
-                                let (_, nw_s) = serialize_narrow_waist_packet(&nw)?;
-                                txrx.db.insert(hbfi_s, nw_s)?;
-                            }
+                            Err(_e) => {}
                         }
                     }
-                }
-            }
+                },
+                TxRx::Inert => panic!("{}", anyhow!("You must peer with a link first")),
+            };
             Ok::<(), anyhow::Error>(())
         });
         Ok(())
     }
     fn set_txrx(&mut self, txrx: TxRx) {
-        self.txrx = Some(txrx);
+        self.txrx = txrx;
     }
-    fn get_txrx(&mut self) -> Option<TxRx> {
-        self.txrx.clone()
+    fn get_protocol_sid(&mut self) -> PrivateIdentityInterface {
+        self.protocol_sid.clone()
+    }
+    fn get_ops(&self) -> Operations {
+        self.ops.clone()
     }
 }
 fn secret_generate() -> (String, [u8; 32]) {

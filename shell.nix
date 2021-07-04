@@ -24,6 +24,15 @@ let
     fi
     exit 0
   '';
+  monitor = writeShellScriptBin "monitor" ''
+    feh --auto-reload 1 out.png &
+    inotifywait -e close_write,moved_to,create -m . |
+    while read -r directory events filename; do
+      if [ "$filename" = "monitor.dot" ]; then
+        dot -Tpng ./monitor.dot > ./monitor.png
+      fi
+    done
+  '';
 in
 stdenv.mkDerivation {
   name = "copernican";

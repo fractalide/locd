@@ -5,76 +5,88 @@ mod protocol;
 mod signals;
 use {
     anyhow::{Result},
-    sled,
     crate::{
         service::{LOCDService},
     },
     copernica_broker::{Broker},
-    copernica_common::{LinkId, ReplyTo},
-    copernica_links::{Link, MpscChannel},
-    copernica_identity::{PrivateIdentity, Seed},
-    copernica_tests::{generate_random_dir_name},
+    copernica_common::{LinkId, ReplyTo, PrivateIdentityInterface, Operations},
+    copernica_links::{Link, MpscChannel, MpscCorruptor, UdpIp},
     log::{debug},
 };
 
 pub fn main() -> Result<()> {
     copernica_common::setup_logging(3, None).unwrap();
-    let mut rng = rand::thread_rng();
-    let a_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let b_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let c_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let brkstr = sled::open(generate_random_dir_name())?;
-    let store_a = sled::open(generate_random_dir_name())?;
-    let store_b = sled::open(generate_random_dir_name())?;
-    let store_c = sled::open(generate_random_dir_name())?;
-    let mut broker = Broker::new(brkstr);
-    let mut locds_a = LOCDService::new(store_a, a_sid.clone());
-    let mut locds_b = LOCDService::new(store_b, b_sid.clone());
-    let mut locds_c = LOCDService::new(store_c, c_sid.clone());
-    let av_br_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let a_vbr_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let bv_br_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let b_vbr_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let cv_br_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let c_vbr_link_sid = PrivateIdentity::from_seed(Seed::generate(&mut rng));
-    let av_br_link_id = LinkId::listen(av_br_link_sid.clone(), Some(a_vbr_link_sid.public_id()), ReplyTo::Mpsc);
-    let a_vbr_link_id = LinkId::listen(a_vbr_link_sid.clone(), Some(av_br_link_sid.public_id()), ReplyTo::Mpsc);
-    let mut av_br_link: MpscChannel = Link::new("lv_b".into(), av_br_link_id.clone(), locds_a.peer_with_link(av_br_link_id)?)?;
-    let mut a_vbr_link: MpscChannel = Link::new("l_vb".into(), a_vbr_link_id.clone(), broker.peer_with_link(a_vbr_link_id)?)?;
-    av_br_link.female(a_vbr_link.male());
-    a_vbr_link.female(av_br_link.male());
-    let bv_br_link_id = LinkId::listen(bv_br_link_sid.clone(), Some(b_vbr_link_sid.public_id()), ReplyTo::Mpsc);
-    let b_vbr_link_id = LinkId::listen(b_vbr_link_sid.clone(), Some(bv_br_link_sid.public_id()), ReplyTo::Mpsc);
-    let mut bv_br_link: MpscChannel = Link::new("lv_b".into(), bv_br_link_id.clone(), locds_b.peer_with_link(bv_br_link_id)?)?;
-    let mut b_vbr_link: MpscChannel = Link::new("l_vb".into(), b_vbr_link_id.clone(), broker.peer_with_link(b_vbr_link_id)?)?;
-    bv_br_link.female(b_vbr_link.male());
-    b_vbr_link.female(bv_br_link.male());
-    let cv_br_link_id = LinkId::listen(cv_br_link_sid.clone(), Some(c_vbr_link_sid.public_id()), ReplyTo::Mpsc);
-    let c_vbr_link_id = LinkId::listen(c_vbr_link_sid.clone(), Some(cv_br_link_sid.public_id()), ReplyTo::Mpsc);
-    let mut cv_br_link: MpscChannel = Link::new("lv_b".into(), cv_br_link_id.clone(), locds_c.peer_with_link(cv_br_link_id)?)?;
-    let mut c_vbr_link: MpscChannel = Link::new("l_vb".into(), c_vbr_link_id.clone(), broker.peer_with_link(c_vbr_link_id)?)?;
-    cv_br_link.female(c_vbr_link.male());
-    c_vbr_link.female(cv_br_link.male());
-    let links: Vec<Box<dyn Link>> = vec![
-        Box::new(av_br_link),
-        Box::new(a_vbr_link),
-        Box::new(bv_br_link),
-        Box::new(b_vbr_link),
-        Box::new(cv_br_link),
-        Box::new(c_vbr_link),
-    ];
-    for link in links {
-        link.run()?;
-    }
-    broker.run()?;
-    locds_a.run()?;
-    locds_b.run()?;
-    locds_c.run()?;
-    debug!("\t\t\t\t\tclient-to-protocol");
-    let i_dont_know  = locds_a.peer_with_node(b_sid.public_id(), 1000, 800);
-    //let i_dont_know2 = locds_b.peer_with_node(c_sid.public_id(), 1000, 800);
-    debug!("\t\t\t\t\tprotocol-to-client");
-    //debug!("\t\t\t\tamount {:?}, secret {:?}", amount, secret_hash);
-    //debug!("\t\t\t\t{:?}", i_dont_know);
+    let ops = Operations::turned_off();
+    let mut broker0 = Broker::new(ops.clone());
+    let mut broker1 = Broker::new(ops.clone());
+    let locd_service_sid0 = PrivateIdentityInterface::new_key();
+    let locd_service_sid1 = PrivateIdentityInterface::new_key();
+    let locd_service_sid2 = PrivateIdentityInterface::new_key();
+    let mut locd_service0: LOCDService = LOCDService::new(locd_service_sid0.clone(), ops.label("service0"));
+    let mut locd_service1: LOCDService = LOCDService::new(locd_service_sid1.clone(), ops.label("service1"));
+    let mut locd_service2: LOCDService = LOCDService::new(locd_service_sid2.clone(), ops.label("service2"));
+
+    // locd_service0 to broker0
+    let link_sid0 = PrivateIdentityInterface::new_key();
+    let link_sid1 = PrivateIdentityInterface::new_key();
+    let link_id0 = LinkId::link_with_type(link_sid0.clone(), None, ReplyTo::Mpsc);
+    let link_id1 = LinkId::link_with_type(link_sid1.clone(), None, ReplyTo::Mpsc);
+    let mut link0: MpscChannel = Link::new(link_id0.clone(), ops.label("link0"), broker0.peer_with_link(link_id0.clone())?)?;
+    let mut link1: MpscChannel = Link::new(link_id1.clone(), ops.label("link1"), locd_service0.peer_with_link(link_id0.clone())?)?;
+    link0.female(link1.male());
+    link1.female(link0.male());
+
+    // broker0 to broker1
+    let link_sid2 = PrivateIdentityInterface::new_key();
+    let link_sid3 = PrivateIdentityInterface::new_key();
+    let link_id2 = LinkId::link_with_type(link_sid2.clone(), Some(link_sid3.public_id()), ReplyTo::Mpsc);
+    let link_id3 = LinkId::link_with_type(link_sid3.clone(), Some(link_sid2.public_id()), ReplyTo::Mpsc);
+    let mut link2: MpscCorruptor = Link::new(link_id2.clone(), ops.label("link2"), broker0.peer_with_link(link_id2.clone())?)?;
+    let mut link3: MpscCorruptor = Link::new(link_id3.clone(), ops.label("link3"), broker1.peer_with_link(link_id3.clone())?)?;
+    link2.female(link3.male());
+    link3.female(link2.male());
+
+    // broker1 to locd_service1
+    let link_sid4 = PrivateIdentityInterface::new_key();
+    let link_sid5 = PrivateIdentityInterface::new_key();
+    let address4 = ReplyTo::UdpIp("127.0.0.1:50002".parse()?);
+    let address5 = ReplyTo::UdpIp("127.0.0.1:50003".parse()?);
+    let link_id4 = LinkId::link_with_type(link_sid4.clone(), Some(link_sid5.public_id()), address4.clone());
+    let link_id5 = LinkId::link_with_type(link_sid5.clone(), Some(link_sid4.public_id()), address5.clone());
+    let link4: UdpIp = Link::new(link_id4.clone(), ops.label("link4"), broker1.peer_with_link(link_id4.remote(address5)?)?)?;
+    let link5: UdpIp = Link::new(link_id5.clone(), ops.label("link5"), locd_service1.peer_with_link(link_id5.remote(address4)?)?)?;
+
+    // broker1 to locd_service2
+    let link_sid6 = PrivateIdentityInterface::new_key();
+    let link_sid7 = PrivateIdentityInterface::new_key();
+    let address6 = ReplyTo::UdpIp("127.0.0.1:50004".parse()?);
+    let address7 = ReplyTo::UdpIp("127.0.0.1:50005".parse()?);
+    let link_id6 = LinkId::link_with_type(link_sid6.clone(), Some(link_sid7.public_id()), address6.clone());
+    let link_id7 = LinkId::link_with_type(link_sid7.clone(), Some(link_sid6.public_id()), address7.clone());
+    let link6: UdpIp = Link::new(link_id6.clone(), ops.label("link6"), broker1.peer_with_link(link_id6.remote(address7)?)?)?;
+    let link7: UdpIp = Link::new(link_id7.clone(), ops.label("link7"), locd_service2.peer_with_link(link_id7.remote(address6)?)?)?;
+
+    locd_service0.run()?;
+    link0.run()?;
+    link1.run()?;
+    broker0.run()?;
+    link2.run()?;
+    link3.run()?;
+    broker1.run()?;
+    link4.run()?;
+    link5.run()?;
+    link6.run()?;
+    link7.run()?;
+    locd_service1.run()?;
+    locd_service2.run()?;
+/*
+    debug!("unreliable unordered cleartext ping");
+    let pong: String = locd_service1.ping(locd_service_sid0.public_id())?;
+    debug!("unreliable unordered cleartext {:?}", pong);
+*/
+    debug!("unreliable unordered cyphertext ping");
+    let pong: String = locd_service0.ping(locd_service_sid1.public_id())?;
+    debug!("unreliable unordered cyphertext {:?}", pong);
+
     Ok(())
 }

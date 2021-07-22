@@ -4,7 +4,7 @@ use {
     copernica_common::{
         bloom_filter_index as bfi,
         NarrowWaistPacket, HBFI, PrivateIdentityInterface, PublicIdentity,
-        Operations, RequestPublicIdentity
+        Operations, PublicIdentityInterface
     },
     copernica_protocols::{Protocol, TxRx},
     log::debug,
@@ -17,14 +17,16 @@ static FUN_PING: &str = "ping";
 static ARG_PING: &str = "ping";
 #[derive(Clone)]
 pub struct LOCD {
+    label: String,
     protocol_sid: PrivateIdentityInterface,
     txrx: TxRx,
     ops: Operations,
 }
-impl<'a> LOCD {
+impl LOCD {
     pub fn cyphertext_ping(&mut self, response_pid: PublicIdentity) -> Result<String> {
-        let hbfi = HBFI::new(RequestPublicIdentity::new(Some(self.txrx.protocol_public_id()?)), response_pid, APP_NAME, MOD_HTLC, FUN_PING, ARG_PING)?;
-        let echo: Vec<Vec<u8>> = self.txrx.unreliable_unordered_request(hbfi.clone(), 0, 0)?;
+        let hbfi = HBFI::new(PublicIdentityInterface::new(self.txrx.protocol_public_id()?), response_pid, APP_NAME, MOD_HTLC, FUN_PING, ARG_PING)?;
+        let mut retries = 5;
+        let echo: Vec<Vec<u8>> = self.txrx.unreliable_sequenced_request(hbfi.clone(), 0, 0, &mut retries)?;
         let mut result: String = "".into();
         for s in &echo {
             let data: &str = bincode::deserialize(&s)?;
@@ -33,10 +35,11 @@ impl<'a> LOCD {
         Ok(result)
     }
 }
-impl<'a> Protocol<'a> for LOCD {
+impl Protocol for LOCD {
     fn new(protocol_sid: PrivateIdentityInterface, (label, ops): (String, Operations)) -> Self {
-        ops.register_protocol(protocol_sid.public_id(), label);
+        ops.register_protocol(label.clone());
         Self {
+            label,
             protocol_sid,
             txrx: TxRx::Inert,
             ops,
@@ -48,7 +51,7 @@ impl<'a> Protocol<'a> for LOCD {
         std::thread::spawn(move || {
             match txrx {
                 TxRx::Initialized {
-                    ref unreliable_unordered_response_tx, .. } => {
+                    ref unreliable_sequenced_response_tx, .. } => {
                     let res_check = bfi(&format!("{}", txrx.protocol_public_id()?))?;
                     let app_check = bfi(APP_NAME)?;
                     let m0d_check = bfi(MOD_HTLC)?;
@@ -86,7 +89,7 @@ impl<'a> Protocol<'a> for LOCD {
                                                 match arg {
                                                     arg if arg == bfi(ARG_PING)? => {
                                                         debug!("\t\t\t|  RESPONSE PACKET ARRIVED");
-                                                        unreliable_unordered_response_tx.send(ilp)?;
+                                                        unreliable_sequenced_response_tx.send(ilp)?;
                                                     },
                                                     _ => {}
                                                 }
@@ -107,6 +110,9 @@ impl<'a> Protocol<'a> for LOCD {
     }
     fn set_txrx(&mut self, txrx: TxRx) {
         self.txrx = txrx;
+    }
+    fn get_label(&self) -> String {
+        self.label.clone()
     }
     fn get_protocol_sid(&mut self) -> PrivateIdentityInterface {
         self.protocol_sid.clone()

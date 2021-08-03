@@ -37,5 +37,5 @@ in
 stdenv.mkDerivation {
   name = "copernican";
   src = null;
-  buildInputs = [ rustup gdb cgdb rr fuse pkgconfig pre-commit];
+  buildInputs = [ rustup gdb pkgconfig pre-commit gitui];
 }

@@ -1,11 +1,12 @@
 use {
-    anyhow::{Result, anyhow},
+    anyhow::{Result},
     bincode,
-    copernica_common::{
+    copernica_packets::{
         bloom_filter_index as bfi,
         NarrowWaistPacket, HBFI, PrivateIdentityInterface, PublicIdentity,
-        Operations, PublicIdentityInterface
+        PublicIdentityInterface
     },
+    copernica_common::{Operations},
     copernica_protocols::{Protocol, TxRx},
     log::debug,
     rand::{distributions::Alphanumeric, thread_rng, Rng},
@@ -24,9 +25,10 @@ pub struct LOCD {
 }
 impl LOCD {
     pub fn cyphertext_ping(&mut self, response_pid: PublicIdentity) -> Result<String> {
-        let hbfi = HBFI::new(PublicIdentityInterface::new(self.txrx.protocol_public_id()?), response_pid, APP_NAME, MOD_HTLC, FUN_PING, ARG_PING)?;
+        let hbfi = HBFI::new(PublicIdentityInterface::new(self.txrx.protocol_pid()?), response_pid, APP_NAME, MOD_HTLC, FUN_PING, ARG_PING)?;
         let mut retries = 5;
-        let echo: Vec<Vec<u8>> = self.txrx.unreliable_sequenced_request(hbfi.clone(), 0, 0, &mut retries)?;
+        let mut window_timeout = 500;
+        let echo: Vec<Vec<u8>> = self.txrx.unreliable_sequenced_request(hbfi.clone(), 0, 0, &mut retries, &mut window_timeout)?;
         let mut result: String = "".into();
         for s in &echo {
             let data: &str = bincode::deserialize(&s)?;
@@ -49,61 +51,55 @@ impl Protocol for LOCD {
     fn run(&self) -> Result<()> {
         let txrx = self.txrx.clone();
         std::thread::spawn(move || {
-            match txrx {
-                TxRx::Initialized {
-                    ref unreliable_sequenced_response_tx, .. } => {
-                    let res_check = bfi(&format!("{}", txrx.protocol_public_id()?))?;
-                    let app_check = bfi(APP_NAME)?;
-                    let m0d_check = bfi(MOD_HTLC)?;
-                    loop {
-                        match txrx.clone().next() {
-                            Ok(ilp) => {
-                                debug!("\t\t\t|  link-to-protocol");
-                                let nw: NarrowWaistPacket = ilp.narrow_waist();
-                                match nw.clone() {
-                                    NarrowWaistPacket::Request { hbfi, .. } => match hbfi {
-                                        HBFI { res, app, m0d, .. }
-                                            if (res == res_check)
-                                                && (app == app_check)
-                                                && (m0d == m0d_check) =>
+            let res_check = bfi(&format!("{}", txrx.protocol_pid()?))?;
+            let app_check = bfi(APP_NAME)?;
+            let m0d_check = bfi(MOD_HTLC)?;
+            loop {
+                match txrx.clone().next() {
+                    Ok(ilp) => {
+                        debug!("\t\t\t|  link-to-protocol");
+                        let nw: NarrowWaistPacket = ilp.narrow_waist();
+                        match nw.clone() {
+                            NarrowWaistPacket::Request { hbfi, .. } => match hbfi {
+                                HBFI { ref res, ref app, ref m0d, .. }
+                                    if (res == &res_check)
+                                        && (app == &app_check)
+                                        && (m0d == &m0d_check) =>
+                                {
+                                    match hbfi {
+                                        HBFI { ref fun, ref arg, .. }
+                                            if (fun == &bfi(FUN_PING)?)
+                                                && (arg == &bfi(ARG_PING)?) =>
                                         {
-                                            match hbfi {
-                                                HBFI { fun, arg, .. }
-                                                    if (fun == bfi(FUN_PING)?)
-                                                        && (arg == bfi(ARG_PING)?) =>
-                                                {
-                                                    let  echo: Vec<u8> = bincode::serialize(&"ping")?;
-                                                    txrx.clone().respond(hbfi.clone(), echo)?;
-                                                }
-                                                _ => {}
-                                            }
+                                            let  echo: Vec<u8> = bincode::serialize(&"ping")?;
+                                            txrx.clone().respond(hbfi.clone(), echo)?;
                                         }
-                                        _ => {}
-                                    },
-                                    NarrowWaistPacket::Response { hbfi, .. } => match hbfi {
-                                        HBFI { app, m0d, fun, arg, .. }
-                                            if (app == app_check)
-                                                && (m0d == m0d_check)
-                                                && (fun == bfi(FUN_PING)?)
-                                            => {
-                                                match arg {
-                                                    arg if arg == bfi(ARG_PING)? => {
-                                                        debug!("\t\t\t|  RESPONSE PACKET ARRIVED");
-                                                        unreliable_sequenced_response_tx.send(ilp)?;
-                                                    },
-                                                    _ => {}
-                                                }
-                                            }
                                         _ => {}
                                     }
                                 }
+                                _ => {}
                             },
-                            Err(_e) => {}
+                            NarrowWaistPacket::Response { hbfi, .. } => match hbfi {
+                                HBFI { app, m0d, fun, arg, .. }
+                                    if (app == app_check)
+                                        && (m0d == m0d_check)
+                                        && (fun == bfi(FUN_PING)?)
+                                    => {
+                                        match arg {
+                                            arg if arg == bfi(ARG_PING)? => {
+                                                debug!("\t\t\t|  RESPONSE PACKET ARRIVED");
+                                                txrx.unreliable_sequenced_response(ilp)?;
+                                            },
+                                            _ => {}
+                                        }
+                                    }
+                                _ => {}
+                            }
                         }
-                    }
-                },
-                TxRx::Inert => panic!("{}", anyhow!("You must peer with a link first")),
-            };
+                    },
+                    Err(_e) => {}
+                }
+            }
             Ok::<(), anyhow::Error>(())
         });
         Ok(())

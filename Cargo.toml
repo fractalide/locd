@@ -10,6 +10,7 @@ copernica-protocols = { path = "../copernica/copernica-protocols" }
 copernica-services = { path = "../copernica/copernica-services" }
 copernica-links = { path = "../copernica/copernica-links" }
 copernica-common = { path = "../copernica/copernica-common" }
+copernica-packets = { path = "../copernica/copernica-packets" }
 copernica-tests = { path = "../copernica/copernica-tests" }
 bincode = "1.3"
 log = "0.4"
@@ -26,3 +27,4 @@ futures-lite = "1.11.3"
 futures = "0.3.12"
 async-executor = "1.4.1"
 packtool = "0.1.0"
+crossbeam-channel = "0.5.1"

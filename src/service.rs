@@ -1,10 +1,11 @@
 use {
-    copernica_common::{LinkId, InterLinkPacket, PrivateIdentityInterface, PublicIdentity, Operations},
+    copernica_packets::{LinkId, InterLinkPacket, PrivateIdentityInterface, PublicIdentity},
     copernica_protocols::{Protocol},
+    copernica_common::{Operations},
     crate::{
         protocol::{LOCD},
     },
-    std::sync::mpsc::{Receiver, SyncSender as Sender},
+    crossbeam_channel::{Receiver, Sender},
     anyhow::{Result},
     //log::{debug, error},
 };

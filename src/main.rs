@@ -2,15 +2,15 @@
 #![feature(bindings_after_at)]
 mod service;
 mod protocol;
-mod signals;
 use {
     anyhow::{Result},
     crate::{
         service::{LOCDService},
     },
     copernica_broker::{Broker},
-    copernica_common::{LinkId, ReplyTo, PrivateIdentityInterface, Operations, PublicIdentityInterface},
-    copernica_links::{Link, MpscChannel, MpscCorruptor, UdpIp},
+    copernica_packets::{LinkId, ReplyTo, PrivateIdentityInterface, PublicIdentityInterface},
+    copernica_common::{Operations},
+    copernica_links::{Link, MpscChannel, MpscCorruptor, UdpIpV4},
     log::{debug},
 };
 
@@ -51,22 +51,22 @@ pub fn main() -> Result<()> {
     // broker1 to locd_service1
     let link_sid4 = PrivateIdentityInterface::new_key();
     let link_sid5 = PrivateIdentityInterface::new_key();
-    let address4 = ReplyTo::UdpIp("127.0.0.1:50002".parse()?);
-    let address5 = ReplyTo::UdpIp("127.0.0.1:50003".parse()?);
+    let address4 = ReplyTo::UdpIpV4("127.0.0.1:50002".parse()?);
+    let address5 = ReplyTo::UdpIpV4("127.0.0.1:50003".parse()?);
     let link_id4 = LinkId::link_with_type(link_sid4.clone(), PublicIdentityInterface::new(link_sid5.public_id()), address4.clone());
     let link_id5 = LinkId::link_with_type(link_sid5.clone(), PublicIdentityInterface::new(link_sid4.public_id()), address5.clone());
-    let mut link4: UdpIp = Link::new(link_id4.clone(), ops.label("link4"), broker1.peer_with_link(link_id4.remote(address5)?)?)?;
-    let mut link5: UdpIp = Link::new(link_id5.clone(), ops.label("link5"), locd_service1.peer_with_link(link_id5.remote(address4)?)?)?;
+    let mut link4: UdpIpV4 = Link::new(link_id4.clone(), ops.label("link4"), broker1.peer_with_link(link_id4.remote(address5)?)?)?;
+    let mut link5: UdpIpV4 = Link::new(link_id5.clone(), ops.label("link5"), locd_service1.peer_with_link(link_id5.remote(address4)?)?)?;
 
     // broker1 to locd_service2
     let link_sid6 = PrivateIdentityInterface::new_key();
     let link_sid7 = PrivateIdentityInterface::new_key();
-    let address6 = ReplyTo::UdpIp("127.0.0.1:50004".parse()?);
-    let address7 = ReplyTo::UdpIp("127.0.0.1:50005".parse()?);
+    let address6 = ReplyTo::UdpIpV4("127.0.0.1:50004".parse()?);
+    let address7 = ReplyTo::UdpIpV4("127.0.0.1:50005".parse()?);
     let link_id6 = LinkId::link_with_type(link_sid6.clone(), PublicIdentityInterface::new(link_sid7.public_id()), address6.clone());
     let link_id7 = LinkId::link_with_type(link_sid7.clone(), PublicIdentityInterface::new(link_sid6.public_id()), address7.clone());
-    let mut link6: UdpIp = Link::new(link_id6.clone(), ops.label("link6"), broker1.peer_with_link(link_id6.remote(address7)?)?)?;
-    let mut link7: UdpIp = Link::new(link_id7.clone(), ops.label("link7"), locd_service2.peer_with_link(link_id7.remote(address6)?)?)?;
+    let mut link6: UdpIpV4 = Link::new(link_id6.clone(), ops.label("link6"), broker1.peer_with_link(link_id6.remote(address7)?)?)?;
+    let mut link7: UdpIpV4 = Link::new(link_id7.clone(), ops.label("link7"), locd_service2.peer_with_link(link_id7.remote(address6)?)?)?;
 
     locd_service0.run()?;
     link0.run()?;
